@@ -5,10 +5,10 @@
 # @Project : SAM
 
 
-SAM_MODEL = 'sam_vit_h_4b8939.pth'
-MODEL_TYPE = 'vit_h'
+SAM_MODEL = 'sam_vit_b_01ec64.pth'
+MODEL_TYPE = 'vit_b'
 
-# curl -O https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth
+# curl -O https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth
 # model_type = 'vit_b'
 # checkpoint = 'sam_vit_b_01ec64.pth'
 # model_type = 'vit_h'
@@ -16,14 +16,14 @@ MODEL_TYPE = 'vit_h'
 
 DEVICE = 'cuda'
 
-ground_truth_dir = r"D:\MyFile\DataSet\ISBI2016_ISIC_Part1\ISBI2016_ISIC_Part1_Training_GroundTruth"
-image_dirPath = r"D:\MyFile\DataSet\ISBI2016_ISIC_Part1\ISBI2016_ISIC_Part1_Training_Data"
+ground_truth_dir = r"/mnt/weichy/Medical_Image/ISBI2016_ISIC_Part1_Training_GroundTruth"
+image_dirPath = r"/mnt/weichy/Medical_Image/ISBI2016_ISIC_Part1_Training_Data"
 
-test_ground_truth_dir = r"D:\MyFile\DataSet\ISBI2016_ISIC_Part1\ISBI2016_ISIC_Part1_Test_GroundTruth"
-test_image_dirPath = r"D:\MyFile\DataSet\ISBI2016_ISIC_Part1\ISBI2016_ISIC_Part1_Test_Data"
+test_ground_truth_dir = r"/mnt/weichy/Medical_Image/ISBI2016_ISIC_Part1_Test_GroundTruth"
+test_image_dirPath = r"/mnt/weichy/Medical_Image/ISBI2016_ISIC_Part1_Test_Data"
 
-EPOCHS = 20
-BATCH_SIZE = 1
+EPOCHS = 50
+BATCH_SIZE = 2
 NUM_WORKERS = 0
 
 # import torch

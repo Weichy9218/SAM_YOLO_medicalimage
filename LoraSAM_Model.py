@@ -57,10 +57,15 @@ if __name__ == "__main__":
     lora_sam = LoraSam(sam_model, 4)
     lora_sam.sam = lora_sam.sam.to(device)
 
+    # lora_sam.sam.image_encoder = nn.DataParallel(lora_sam.sam.image_encoder)
+    # lora_sam.sam.prompt_encoder = nn.DataParallel(lora_sam.sam.prompt_encoder)
+    # lora_sam.sam.mask_decoder = nn.DataParallel(lora_sam.sam.mask_decoder)
+    # image_pe=lora_sam.sam.prompt_encoder.module.get_dense_pe(),
+
     train_dataloader, val_dataloader = get_dataloader(is_train=1, transform=transforms.Compose([transforms.ToTensor()]))
 
-    lr = 1e-4
-    wd = 0
+    lr = 1e-5
+    wd = 1e-5
     optimizer = torch.optim.Adam(filter(lambda P: P.requires_grad, lora_sam.sam.parameters()), lr=lr, weight_decay=wd)
 
     # loss_fn = torch.nn.MSELoss()
@@ -71,8 +76,7 @@ if __name__ == "__main__":
     lora_sam.sam.train()
     for epoch in tqdm(range(num_epochs)):
         epoch_Train_loss = []
-        for idx, (input_image, gt_binary_mask, box_torch, original_image_size, input_size) in enumerate(
-                train_dataloader):
+        for input_image, gt_binary_mask, box_torch, original_image_size, input_size in tqdm(train_dataloader):
             # print(idx, (input_image, gt_binary_mask,box_torch))
             # print(input_image.shape, type(input_image))  # torch.Size([1, 3, 1024, 1024]) <class 'torch.Tensor'>
 
@@ -86,18 +90,18 @@ if __name__ == "__main__":
                 boxes=box_torch,
                 masks=None,
             )
-            print("box:", sparse_embeddings, dense_embeddings)
+            # print("box:", sparse_embeddings, dense_embeddings)
 
             # decoder
             low_res_masks, iou_predictions = lora_sam.sam.mask_decoder(
                 image_embeddings=image_embedding,
                 image_pe=lora_sam.sam.prompt_encoder.get_dense_pe(),
-                sparse_prompt_embeddings=sparse_embeddings,
+                sparse_prompt_embeddings=sparse_embeddings[0,:,:].unsqueeze(0),
                 dense_prompt_embeddings=dense_embeddings,
                 multimask_output=False,
             )
-
-            upscaled_masks = lora_sam.sam.postprocess_masks(low_res_masks, input_size, original_image_size).to(
+            # input_size, original_image_size
+            upscaled_masks = lora_sam.sam.postprocess_masks(low_res_masks, (1024,1024), (1024,1024)).to(
                 device=device)
 
             # print(low_res_masks, low_res_masks.shape)
@@ -106,17 +110,19 @@ if __name__ == "__main__":
             binary_mask = normalize(threshold(upscaled_masks, 0.0, 0))
 
             loss = loss_fn(binary_mask, gt_binary_mask)
+            # print("binary_mask, gt_binary_mask",binary_mask.shape, gt_binary_mask.shape)
+            # print(loss)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             epoch_Train_loss.append(loss.item())
         train_losses.append(epoch_Train_loss)
 
+
         with torch.no_grad():
             lora_sam.sam.eval()
             epoch_val_loss = []
-            for idx, (input_image, gt_binary_mask, box_torch, original_image_size, input_size) in enumerate(
-                    val_dataloader):
+            for input_image, gt_binary_mask, box_torch, original_image_size, input_size in tqdm(val_dataloader):
                 # print(idx, (input_image, gt_binary_mask,box_torch))
                 # print(input_image.shape, type(input_image))  # torch.Size([1, 3, 1024, 1024]) <class 'torch.Tensor'>
 
@@ -136,12 +142,12 @@ if __name__ == "__main__":
                 low_res_masks, iou_predictions = lora_sam.sam.mask_decoder(
                     image_embeddings=image_embedding,
                     image_pe=lora_sam.sam.prompt_encoder.get_dense_pe(),
-                    sparse_prompt_embeddings=sparse_embeddings,
+                    sparse_prompt_embeddings=sparse_embeddings[0,:,:].unsqueeze(0),
                     dense_prompt_embeddings=dense_embeddings,
                     multimask_output=False,
                 )
 
-                upscaled_masks = lora_sam.sam.postprocess_masks(low_res_masks, input_size, original_image_size).to(
+                upscaled_masks = lora_sam.sam.postprocess_masks(low_res_masks, (1024,1024), (1024,1024)).to(
                     device=device)
 
                 # print(low_res_masks, low_res_masks.shape)
@@ -167,8 +173,18 @@ if __name__ == "__main__":
     plt.title('Mean epoch loss')
     plt.xlabel('Epoch Number')
     plt.ylabel('Loss')
-    plt.savefig("Image/loss.png")
+    plt.savefig("Image2/Aloss.png")
     plt.show()
+
+    # 保存模型到文件
+    import pickle
+    model_filename = "model.pkl"
+    with open(model_filename, "wb") as model_file:
+        pickle.dump(lora_sam.sam, model_file)
+
+    # # 从文件加载模型
+    # with open(model_filename, "rb") as model_file:
+    #     loaded_model = pickle.load(model_file)
 
     # compare our tuned model to the original model
     # Load up the model with default weights
@@ -181,7 +197,7 @@ if __name__ == "__main__":
     predictor_tuned = SamPredictor(lora_sam.sam)
     predictor_original = SamPredictor(sam_model_orig)
 
-    ground_truth_dir = lib.ground_truth_dir
+    ground_truth_dir = lib.test_ground_truth_dir
     ground_truth_list = os.listdir(ground_truth_dir)
 
     bbox_coords = {}  # {"image_name":[x, y, x + w, y + h]}
@@ -227,6 +243,9 @@ if __name__ == "__main__":
             multimask_output=False,
         )
 
+        print("masks_tuned", masks_tuned.shape, type(masks_tuned))
+        print("masks_orig", masks_orig.shape, type(masks_orig))
+
         _, axs = plt.subplots(1, 2, figsize=(25, 25))
 
         axs[0].imshow(image)
@@ -241,6 +260,6 @@ if __name__ == "__main__":
         axs[1].set_title('Mask with Untuned Model', fontsize=26)
         axs[1].axis('off')
 
-        plt.show()
+        plt.savefig(f"Image2/{k}")
 
     pass
