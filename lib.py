@@ -8,6 +8,9 @@
 SAM_MODEL = 'sam_vit_b_01ec64.pth'
 MODEL_TYPE = 'vit_b'
 
+# SAM_MODEL = 'sam_vit_h_4b8939.pth'
+# MODEL_TYPE = 'vit_h'
+
 # curl -O https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth
 # model_type = 'vit_b'
 # checkpoint = 'sam_vit_b_01ec64.pth'
@@ -22,7 +25,7 @@ image_dirPath = r"/mnt/weichy/Medical_Image/ISBI2016_ISIC_Part1_Training_Data"
 test_ground_truth_dir = r"/mnt/weichy/Medical_Image/ISBI2016_ISIC_Part1_Test_GroundTruth"
 test_image_dirPath = r"/mnt/weichy/Medical_Image/ISBI2016_ISIC_Part1_Test_Data"
 
-EPOCHS = 50
+EPOCHS = 2
 BATCH_SIZE = 2
 NUM_WORKERS = 0
 

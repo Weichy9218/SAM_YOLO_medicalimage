@@ -23,6 +23,45 @@ from Dataset import MedicalDataset, get_dataloader
 from SAM_loRA_ImageEncoder_MaskDecoder import LoraSam
 from torch.nn.functional import threshold, normalize
 
+class EarlyStopping:
+    def __init__(self, patience=10, verbose=False, delta=0):
+        """
+        参数:
+        patience (int): 在早停前可以容忍多少个epoch没有改善
+        verbose (bool): 是否打印早停信息
+        delta (float): “改善”需要超过这个阈值
+        """
+        self.patience = patience
+        self.verbose = verbose
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        self.val_loss_min = float('inf')
+        self.delta = delta
+
+    def __call__(self, val_loss, model):
+        score = -val_loss
+
+        if self.best_score is None:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+        elif score < self.best_score + self.delta:
+            self.counter += 1
+            if self.verbose:
+                print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+            self.counter = 0
+
+    def save_checkpoint(self, val_loss, model):
+        """如果验证损失下降，则保存模型"""
+        if self.verbose:
+            print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}). Saving model ...')
+        torch.save(model.state_dict(), 'checkpoint.pt')
+        self.val_loss_min = val_loss
 
 def show_mask(mask, ax, random_color=False):
     if random_color:
@@ -39,10 +78,14 @@ def show_box(Box, ax):
     W, H = Box[2] - Box[0], Box[3] - Box[1]
     ax.add_patch(plt.Rectangle((x0, y0), W, H, edgecolor='green', facecolor=(0, 0, 0, 0), lw=2))
 
-
-if __name__ == "__main__":
     # 微调版本
-
+if __name__ == "__main__":
+    # 测试文件保存位置
+    save_path = './Image3'
+    # 判断文件夹是否存在
+    if not os.path.exists(save_path):
+        # 如果不存在，则创建文件夹
+        os.makedirs(save_path)
     # 配置信息
     model_type = lib.MODEL_TYPE
     checkpoint = lib.SAM_MODEL
@@ -65,15 +108,22 @@ if __name__ == "__main__":
     train_dataloader, val_dataloader = get_dataloader(is_train=1, transform=transforms.Compose([transforms.ToTensor()]))
 
     lr = 1e-5
-    wd = 1e-5
-    optimizer = torch.optim.Adam(filter(lambda P: P.requires_grad, lora_sam.sam.parameters()), lr=lr, weight_decay=wd)
+    wd = 1e-4
+    
+    optimizer = torch.optim.Adam(filter(lambda P: P.requires_grad, lora_sam.sam.parameters()), lr=lr, 
+                            betas=(0.9, 0.999), eps=1e-08, weight_decay=wd, amsgrad=True)
 
-    # loss_fn = torch.nn.MSELoss()
-    loss_fn = torch.nn.BCELoss()
+    loss_fn = torch.nn.MSELoss()
+    # loss_fn = torch.nn.BCELoss()
     num_epochs = lib.EPOCHS
     train_losses = []
     val_losses = []
     lora_sam.sam.train()
+
+    # 实例化早停类
+    early_stopping = EarlyStopping(patience=2, verbose=True)
+
+    # 开始训练 
     for epoch in tqdm(range(num_epochs)):
         epoch_Train_loss = []
         for input_image, gt_binary_mask, box_torch, original_image_size, input_size in tqdm(train_dataloader):
@@ -110,13 +160,20 @@ if __name__ == "__main__":
             binary_mask = normalize(threshold(upscaled_masks, 0.0, 0))
 
             loss = loss_fn(binary_mask, gt_binary_mask)
-            # print("binary_mask, gt_binary_mask",binary_mask.shape, gt_binary_mask.shape)
-            # print(loss)
+            #print("binary_mask, gt_binary_mask",binary_mask.shape, gt_binary_mask.shape,binary_mask,gt_binary_mask)
+            
+            #print(loss)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             epoch_Train_loss.append(loss.item())
         train_losses.append(epoch_Train_loss)
+        # 绘制损失曲线
+        plt.plot(list(range(len(train_losses[-1]))), train_losses[-1])
+        plt.title('Batch loss')
+        plt.xlabel('Batch Divided')
+        plt.ylabel('Loss')
+        plt.savefig(os.path.join(save_path, f"{epoch}Batchloss"))
 
 
         with torch.no_grad():
@@ -154,11 +211,18 @@ if __name__ == "__main__":
                 # print(upscaled_masks, upscaled_masks.shape)
 
                 binary_mask = normalize(threshold(upscaled_masks, 0.0, 0))
-
+                # print(binary_mask,gt_binary_mask)
                 loss = loss_fn(binary_mask, gt_binary_mask)
 
                 epoch_val_loss.append(loss.item())
-            val_losses.append(epoch_val_loss)
+
+        # 在训练结束时调用早停
+        early_stopping(mean(epoch_val_loss), lora_sam.sam)
+
+        if early_stopping.early_stop:
+            print("早停...")
+            break
+        val_losses.append(epoch_val_loss)
 
         print(f'Epoch: {epoch}')
         print(f'train Mean loss: {mean(epoch_Train_loss)}')
@@ -173,8 +237,7 @@ if __name__ == "__main__":
     plt.title('Mean epoch loss')
     plt.xlabel('Epoch Number')
     plt.ylabel('Loss')
-    plt.savefig("Image2/Aloss.png")
-    plt.show()
+    plt.savefig(os.path.join(save_path, "Epochloss"))
 
     # 保存模型到文件
     import pickle
@@ -222,7 +285,7 @@ if __name__ == "__main__":
     # print(bbox_coords)
     keys = list(bbox_coords.keys())
     image_dirPath = lib.test_image_dirPath
-    for k in keys:
+    for k in keys[0:50]:
         image = cv2.imread(os.path.join(image_dirPath, "{0}.jpg".format(k)))
 
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -260,6 +323,6 @@ if __name__ == "__main__":
         axs[1].set_title('Mask with Untuned Model', fontsize=26)
         axs[1].axis('off')
 
-        plt.savefig(f"Image2/{k}")
+        plt.savefig(os.path.join(save_path, str(k)))
 
     pass
