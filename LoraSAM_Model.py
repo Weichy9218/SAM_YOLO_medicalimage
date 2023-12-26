@@ -81,7 +81,7 @@ def show_box(Box, ax):
     # 微调版本
 if __name__ == "__main__":
     # 测试文件保存位置
-    save_path = './Image3'
+    save_path = './Image4'
     # 判断文件夹是否存在
     if not os.path.exists(save_path):
         # 如果不存在，则创建文件夹
@@ -97,7 +97,7 @@ if __name__ == "__main__":
 
     # sam_model.to(device=device)
     # print(sam_model)
-    lora_sam = LoraSam(sam_model, 4)
+    lora_sam = LoraSam(sam_model, 8)
     lora_sam.sam = lora_sam.sam.to(device)
 
     # lora_sam.sam.image_encoder = nn.DataParallel(lora_sam.sam.image_encoder)
@@ -107,8 +107,8 @@ if __name__ == "__main__":
 
     train_dataloader, val_dataloader = get_dataloader(is_train=1, transform=transforms.Compose([transforms.ToTensor()]))
 
-    lr = 1e-5
-    wd = 1e-4
+    lr = 5e-5
+    wd = 1e-5
     
     optimizer = torch.optim.Adam(filter(lambda P: P.requires_grad, lora_sam.sam.parameters()), lr=lr, 
                             betas=(0.9, 0.999), eps=1e-08, weight_decay=wd, amsgrad=True)
@@ -118,10 +118,11 @@ if __name__ == "__main__":
     num_epochs = lib.EPOCHS
     train_losses = []
     val_losses = []
+    iou_res = []
     lora_sam.sam.train()
 
     # 实例化早停类
-    early_stopping = EarlyStopping(patience=2, verbose=True)
+    early_stopping = EarlyStopping(patience=3, verbose=True)
 
     # 开始训练 
     for epoch in tqdm(range(num_epochs)):
@@ -150,16 +151,20 @@ if __name__ == "__main__":
                 dense_prompt_embeddings=dense_embeddings,
                 multimask_output=False,
             )
+            print(iou_predictions)
             # input_size, original_image_size
-            upscaled_masks = lora_sam.sam.postprocess_masks(low_res_masks, (1024,1024), (1024,1024)).to(
-                device=device)
-
+            upscaled_masks = lora_sam.sam.postprocess_masks(low_res_masks, (1024,1024), (1024,1024)).to(device=device)
+            binary_mask = normalize(threshold(upscaled_masks, 0.0,0))
             # print(low_res_masks, low_res_masks.shape)
             # print(upscaled_masks, upscaled_masks.shape)
 
-            binary_mask = normalize(threshold(upscaled_masks, 0.0, 0))
+            # Instantiate the combined loss
+            from MyLoss import CombinedLoss
+            combined_loss = CombinedLoss(alpha=0.5, beta=0.5)
 
-            loss = loss_fn(binary_mask, gt_binary_mask)
+            # Calculate the loss
+            loss = combined_loss(binary_mask, gt_binary_mask)
+            # loss = loss_fn(binary_mask, gt_binary_mask)
             #print("binary_mask, gt_binary_mask",binary_mask.shape, gt_binary_mask.shape,binary_mask,gt_binary_mask)
             
             #print(loss)
@@ -168,12 +173,13 @@ if __name__ == "__main__":
             optimizer.step()
             epoch_Train_loss.append(loss.item())
         train_losses.append(epoch_Train_loss)
-        # 绘制损失曲线
-        plt.plot(list(range(len(train_losses[-1]))), train_losses[-1])
-        plt.title('Batch loss')
-        plt.xlabel('Batch Divided')
-        plt.ylabel('Loss')
-        plt.savefig(os.path.join(save_path, f"{epoch}Batchloss"))
+        # iou_res.append(iou_predictions)
+        # # 绘制损失曲线
+        # plt.plot(list(range(len(train_losses[-1]))), train_losses[-1])
+        # plt.title('Batch loss')
+        # plt.xlabel('Batch Divided')
+        # plt.ylabel('Loss')
+        # plt.savefig(os.path.join(save_path, f"{epoch}Batchloss"))
 
 
         with torch.no_grad():
@@ -212,7 +218,12 @@ if __name__ == "__main__":
 
                 binary_mask = normalize(threshold(upscaled_masks, 0.0, 0))
                 # print(binary_mask,gt_binary_mask)
-                loss = loss_fn(binary_mask, gt_binary_mask)
+
+                combined_loss = CombinedLoss(alpha=0.5, beta=0.5)
+
+            # Calculate the loss
+                loss = combined_loss(binary_mask, gt_binary_mask)
+                #loss = loss_fn(binary_mask, gt_binary_mask)
 
                 epoch_val_loss.append(loss.item())
 

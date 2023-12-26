@@ -91,7 +91,7 @@ class LoraSam(nn.Module):
             param.requires_grad = False
 
         for param in sam_model.prompt_encoder.parameters():
-            param.requires_grad = True
+            param.requires_grad = False
 
         # for param in sam_model.mask_decoder.parameters():
         #     param.requires_grad = True
